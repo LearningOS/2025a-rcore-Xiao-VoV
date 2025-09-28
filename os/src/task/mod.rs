@@ -15,14 +15,14 @@ mod switch;
 mod task;
 
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::MapPermission;
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
+pub use context::TaskContext;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
-
-pub use context::TaskContext;
 
 /// The task manager, where all the tasks are managed.
 ///
@@ -153,6 +153,36 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    /// 映射一个新的逻辑段
+    pub fn map_new_area(&self, start: usize, len: usize, port: MapPermission) -> Option<usize> {
+        let current_task = self.inner.exclusive_access().current_task;
+        self.inner.exclusive_access().tasks[current_task]
+            .memory_set
+            .insert_framed_area((start).into(), (start + len).into(), port);
+        Some(0)
+    }
+        /// 将一个逻辑段解除映射
+    pub fn unmap_area(&self, start: usize, len: usize) -> Option<isize> {
+        let current_task = self.inner.exclusive_access().current_task;
+        self.inner.exclusive_access().tasks[current_task]
+            .memory_set
+            .remove_framed_area((start).into(), (start + len).into());
+        Some(0)
+    }
+
+
+
+    fn get_syscall_counter(&self, id: usize) -> isize {
+        let inner: core::cell::RefMut<'_, TaskManagerInner> = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_counter[id]
+    }
+    fn set_syscall_counter(&self, id: usize) {
+        let mut inner: core::cell::RefMut<'_, TaskManagerInner> = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_counter[id] += 1;
+    }
 }
 
 /// Run the first task in task list.
@@ -201,4 +231,24 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// 映射一个新的逻辑段
+pub fn map_new_area(start: usize, len: usize, port: MapPermission) -> Option<usize> {
+    TASK_MANAGER.map_new_area(start, len, port)
+}
+/// 将一个逻辑段解除映射
+pub fn unmap_area(start: usize, len: usize) -> Option<isize> {
+    TASK_MANAGER.unmap_area(start, len)
+}
+
+/// sys_trace
+pub fn get_systrace(id: usize) -> isize {
+    trace!("kernel: sys_yield");
+    TASK_MANAGER.get_syscall_counter(id)
+}
+
+/// sys_trace
+pub fn set_sys_trace(id: usize) {
+    TASK_MANAGER.set_syscall_counter(id);
 }
